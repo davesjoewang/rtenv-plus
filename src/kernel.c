@@ -166,7 +166,7 @@ void rs232_xmit_msg_task()
 
 	fdout = open("/dev/tty0/out", 0);
 	fdin = mq_open("/tmp/mqueue/out", O_CREAT);
-	setpriority(0, PRIORITY_DEFAULT - 2);
+	setpriority(PRIO_PROCESS, 0, PRIORITY_DEFAULT - 2);
 
 	while (1) {
 		/* Read from the queue.  Keep trying until a message is
@@ -708,15 +708,15 @@ void show_xxd(int argc, char *argv[])
 
 void first()
 {
-	if (!fork()) setpriority(0, 0), pathserver();
-	if (!fork()) setpriority(0, 0), romdev_driver();
-	if (!fork()) setpriority(0, 0), romfs_server();
-	if (!fork()) setpriority(0, 0), serialout(USART2, USART2_IRQn);
-	if (!fork()) setpriority(0, 0), serialin(USART2, USART2_IRQn);
+	if (!fork()) setpriority(PRIO_PROCESS, 0, 0), pathserver();
+	if (!fork()) setpriority(PRIO_PROCESS, 0, 0), romdev_driver();
+	if (!fork()) setpriority(PRIO_PROCESS, 0, 0), romfs_server();
+	if (!fork()) setpriority(PRIO_PROCESS, 0, 0), serialout(USART2, USART2_IRQn);
+	if (!fork()) setpriority(PRIO_PROCESS, 0, 0), serialin(USART2, USART2_IRQn);
 	if (!fork()) rs232_xmit_msg_task();
-	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), serial_test_task();
+	if (!fork()) setpriority(PRIO_PROCESS, 0, PRIORITY_DEFAULT - 10), serial_test_task();
 
-	setpriority(0, PRIORITY_LIMIT);
+	setpriority(PRIO_PROCESS, 0, PRIORITY_LIMIT);
 
 	mount("/dev/rom0", "/", ROMFS_TYPE, 0);
 
@@ -887,34 +887,56 @@ int main()
 			tasks[current_task].status = TASK_WAIT_INTR;
 			break;
 		case 0x6: /* getpriority */
-			{
-				int who = tasks[current_task].stack->r0;
-				if (who > 0 && who < (int)task_count)
-					tasks[current_task].stack->r0 = tasks[who].priority;
-				else if (who == 0)
-					tasks[current_task].stack->r0 = tasks[current_task].priority;
-				else
-					tasks[current_task].stack->r0 = -1;
+			{	int which = tasks[current_task].stack->r0;		
+				int who = tasks[current_task].stack->r1;
+				switch(which){
+					case PRIO_PROCESS:
+						if (who > 0 && who < (int)task_count)
+							tasks[current_task].stack->r0 = tasks[who].priority;
+						else if (who == 0)
+							tasks[current_task].stack->r0 = tasks[current_task].priority;
+						else
+							tasks[current_task].stack->r0 = -1;
+						break;
+
+					case PRIO_PGRP:
+						break;
+
+					case PRIO_USER:
+						break;
+
+				}
+					
 			} break;
 		case 0x7: /* setpriority */
 			{
-				int who = tasks[current_task].stack->r0;
-				int value = tasks[current_task].stack->r1;
+				int which = tasks[current_task].stack->r0;				
+				int who = tasks[current_task].stack->r1;
+				int value = tasks[current_task].stack->r2;
 				value = (value < 0) ? 0 : ((value > PRIORITY_LIMIT) ? PRIORITY_LIMIT : value);
-				if (who > 0 && who < (int)task_count) {
-					tasks[who].priority = value;
-					if (tasks[who].status == TASK_READY)
-					    list_push(&ready_list[value], &tasks[who].list);
-				}
-				else if (who == 0) {
-					tasks[current_task].priority = value;
-				    list_unshift(&ready_list[value], &tasks[current_task].list);
-				}
-				else {
-					tasks[current_task].stack->r0 = -1;
-					break;
-				}
-				tasks[current_task].stack->r0 = 0;
+				switch(which){
+					case PRIO_PROCESS:
+						if (who > 0 && who < (int)task_count) {
+							tasks[who].priority = value;
+							if (tasks[who].status == TASK_READY)
+							    list_push(&ready_list[value], &tasks[who].list);
+						}
+						else if (who == 0) {
+							tasks[current_task].priority = value;
+						    list_unshift(&ready_list[value], &tasks[current_task].list);
+						}
+						else {
+							tasks[current_task].stack->r0 = -1;
+							break;
+						}
+						tasks[current_task].stack->r0 = 0;
+						break;
+					case PRIO_PGRP:
+						break;
+
+					case PRIO_USER:
+						break;
+				}		
 			} break;
 		case 0x8: /* mknod */
 			tasks[current_task].stack->r0 =
